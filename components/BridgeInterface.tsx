@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, SystemProgram, Transaction, PublicKey } from '@solana/web3.js';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { ArrowDown, Settings, History, Info, Wallet, X, ChevronDown, ExternalLink, Copy, QrCode, RefreshCw, ArrowRight, ArrowRightLeft, Check, Loader2, Activity, TrendingUp, User, BarChart3, Sliders, Globe, ChevronRight, Clock, Bell, Lock, LogOut, ArrowLeft } from 'lucide-react';
 import { getExchangeQuote, createExchangeTrade, getExchangeStatus } from '@/app/actions/simpleswap';
@@ -155,13 +155,15 @@ interface BridgeInterfaceProps {
 
 // --- THE REAL BRIDGE INTERFACE ---
 const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
-    const { connected, publicKey, connect, disconnect, select, wallets } = useWallet();
+    const { connected, publicKey, connect, disconnect, select, wallets, sendTransaction } = useWallet();
     const { connection } = useConnection();
     const [activeTab, setActiveTab] = useState('Bridge');
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
-    const [zecAmount, setZecAmount] = useState('');
-    const [solAmount, setSolAmount] = useState<string>('--');
+    const [amount, setAmount] = useState(''); // Unified amount state
+    const [quoteAmount, setQuoteAmount] = useState<string>('--'); // Unified quote state
+    const [direction, setDirection] = useState<'ZEC_TO_SOL' | 'SOL_TO_ZEC'>('ZEC_TO_SOL');
+    const [selectedSolToken, setSelectedSolToken] = useState('sol'); // 'sol', 'usdc', etc.
     const [trade, setTrade] = useState<any>(null);
     const [tradeStatus, setTradeStatus] = useState<string>('');
     const [modalOpen, setModalOpen] = useState(false);
@@ -197,28 +199,27 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
     // Debounce quote fetching
     useEffect(() => {
         const fetchQuote = async () => {
-            if (!zecAmount || isNaN(parseFloat(zecAmount))) {
-                console.log('No valid ZEC amount, setting SOL to --');
-                setSolAmount('--');
+            if (!amount || isNaN(parseFloat(amount))) {
+                setQuoteAmount('--');
                 return;
             }
-            const amount = parseFloat(zecAmount);
-            console.log('Fetching quote for ZEC amount:', amount);
-            if (amount > 0) {
-                const quote = await getExchangeQuote(amount);
-                console.log('Received quote:', quote);
+            const inputAmount = parseFloat(amount);
+            if (inputAmount > 0) {
+                const from = direction === 'ZEC_TO_SOL' ? 'zec' : selectedSolToken;
+                const to = direction === 'ZEC_TO_SOL' ? selectedSolToken : 'zec';
+
+                const quote = await getExchangeQuote(inputAmount, from, to);
                 if (quote) {
-                    setSolAmount(quote.toFixed(4));
+                    setQuoteAmount(quote.toFixed(4));
                 } else {
-                    console.error('Quote was null!');
-                    setSolAmount('--');
+                    setQuoteAmount('--');
                 }
             }
         };
 
         const timeoutId = setTimeout(fetchQuote, 500);
         return () => clearTimeout(timeoutId);
-    }, [zecAmount]);
+    }, [amount, direction, selectedSolToken]);
 
     // Poll trade status
     useEffect(() => {
@@ -245,14 +246,14 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
             return;
         }
 
-        // Only require ZEC connection if Snap is supported
-        if (snapSupported && !zecAddress) {
+        // Only require ZEC connection if Snap is supported AND we are sending ZEC
+        if (direction === 'ZEC_TO_SOL' && snapSupported && !zecAddress) {
             alert('Please connect your Zcash wallet first');
             return;
         }
 
-        if (!zecAmount || parseFloat(zecAmount) <= 0) {
-            alert('Please enter a valid ZEC amount');
+        if (!amount || parseFloat(amount) <= 0) {
+            alert('Please enter a valid amount');
             return;
         }
 
@@ -260,7 +261,30 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
         setShowConfirmSheet(false); // Close sheet if open
 
         try {
-            const tradeData = await createExchangeTrade(parseFloat(zecAmount), publicKey.toBase58());
+            const from = direction === 'ZEC_TO_SOL' ? 'zec' : selectedSolToken;
+            const to = direction === 'ZEC_TO_SOL' ? selectedSolToken : 'zec';
+
+            // For ZEC -> SOL, recipient is Solana wallet.
+            // For SOL -> ZEC, recipient is Zcash wallet (need input or connected snap).
+            let recipient = '';
+            if (direction === 'ZEC_TO_SOL') {
+                recipient = publicKey.toBase58();
+            } else {
+                // SOL -> ZEC
+                if (zecAddress) {
+                    recipient = zecAddress;
+                } else {
+                    // TODO: Add manual ZEC address input for SOL -> ZEC if Snap not connected
+                    const manualAddress = prompt("Enter your Zcash recipient address:");
+                    if (!manualAddress) {
+                        setLoading(false);
+                        return;
+                    }
+                    recipient = manualAddress;
+                }
+            }
+
+            const tradeData = await createExchangeTrade(parseFloat(amount), recipient, from, to);
 
             if (!tradeData) {
                 alert('Failed to create trade. Please check your API key and try again.');
@@ -270,21 +294,50 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
             setTrade(tradeData);
             setTradeStatus('waiting');
 
-            // Attempt to send via Snap if supported
-            if (snapSupported && zecAddress) {
-                try {
-                    await sendZec(tradeData.inAddress, tradeData.inAmount.toString(), tradeData.extraId);
-                    // If successful, the UI will update via polling
-                } catch (err: any) {
-                    console.error("Snap send failed:", err);
-                    // Fallback to manual/deep link
+            // Handle Sending Logic
+            if (direction === 'ZEC_TO_SOL') {
+                // Sending ZEC
+                if (snapSupported && zecAddress) {
+                    try {
+                        await sendZec(tradeData.inAddress, tradeData.inAmount.toString(), tradeData.extraId);
+                    } catch (err: any) {
+                        console.error("Snap send failed:", err);
+                        const okxDeepLink = `okx://wallet/transfer?chain=zcash&to=${tradeData.inAddress}&amount=${tradeData.inAmount}${tradeData.extraId ? '&memo=' + encodeURIComponent(tradeData.extraId) : ''}`;
+                        alert("Please confirm the transaction in your wallet. If the popup didn't appear, use the manual transfer details below.");
+                    }
+                } else {
                     const okxDeepLink = `okx://wallet/transfer?chain=zcash&to=${tradeData.inAddress}&amount=${tradeData.inAmount}${tradeData.extraId ? '&memo=' + encodeURIComponent(tradeData.extraId) : ''}`;
-                    alert("Please confirm the transaction in your wallet. If the popup didn't appear, use the manual transfer details below.");
+                    window.open(okxDeepLink, '_blank');
                 }
             } else {
-                // Snap not supported (e.g. OKX Wallet), auto-trigger Deep Link or just let user see details
-                const okxDeepLink = `okx://wallet/transfer?chain=zcash&to=${tradeData.inAddress}&amount=${tradeData.inAmount}${tradeData.extraId ? '&memo=' + encodeURIComponent(tradeData.extraId) : ''}`;
-                window.open(okxDeepLink, '_blank');
+                // Sending SOL/SPL
+                if (selectedSolToken === 'sol') {
+                    try {
+                        const transaction = new Transaction().add(
+                            SystemProgram.transfer({
+                                fromPubkey: publicKey,
+                                toPubkey: new PublicKey(tradeData.inAddress),
+                                lamports: Math.floor(tradeData.inAmount * LAMPORTS_PER_SOL),
+                            })
+                        );
+
+                        const signature = await sendTransaction(transaction, connection);
+
+                        // Notify user
+                        console.log('Transaction sent:', signature);
+
+                        // We don't strictly need to wait for confirmation here as the polling will pick it up,
+                        // but it's good UX to know it was sent.
+                        await connection.confirmTransaction(signature, 'processed');
+
+                    } catch (error) {
+                        console.error('Error sending SOL:', error);
+                        alert('Failed to send SOL. Please try again or send manually.');
+                    }
+                } else {
+                    // SPL Token transfer (USDC, etc.) - Placeholder
+                    alert(`Please send ${tradeData.inAmount} ${tradeData.inCurrency.toUpperCase()} to ${tradeData.inAddress}`);
+                }
             }
 
             // Start polling for status
@@ -306,6 +359,13 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const toggleDirection = () => {
+        setDirection(prev => prev === 'ZEC_TO_SOL' ? 'SOL_TO_ZEC' : 'ZEC_TO_SOL');
+        // Swap amounts logic if needed, or just clear
+        setAmount('');
+        setQuoteAmount('--');
     };
 
     // Main Content Component Switcher
@@ -330,7 +390,9 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-xs text-gray-500">Available Balance</p>
-                                        <p className="text-sm font-mono text-white">-- ZEC</p>
+                                        <p className="text-sm font-mono text-white">
+                                            {direction === 'ZEC_TO_SOL' ? '-- ZEC' : (solBalance !== null ? `${solBalance.toFixed(4)} SOL` : '--')}
+                                        </p>
                                     </div>
                                 </div>
 
@@ -338,24 +400,37 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                                     <div className="flex-1 w-full">
                                         <input
                                             type="number"
-                                            value={zecAmount}
-                                            onChange={(e) => setZecAmount(e.target.value)}
+                                            value={amount}
+                                            onChange={(e) => setAmount(e.target.value)}
                                             className="w-full bg-transparent text-5xl lg:text-6xl font-bold text-white placeholder-gray-800 outline-none font-mono tracking-tighter"
                                             placeholder="0.000"
                                             step="0.001"
                                             min="0"
                                         />
                                         <p className="text-gray-500 mt-1 text-sm">
-                                            ≈ ${prices && zecAmount ? (parseFloat(zecAmount) * prices.zec).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'} USD
+                                            {/* TODO: Fix USD calculation based on direction */}
+                                            ≈ $-- USD
                                         </p>
                                     </div>
 
                                     <div className="flex items-center gap-3 bg-[#141414] pl-3 pr-5 py-2.5 rounded-2xl border border-white/10 hover:bg-[#1a1a1a] cursor-pointer transition-colors shrink-0">
-                                        <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-black font-bold">Z</div>
-                                        <div className="text-left">
-                                            <p className="font-bold text-base leading-none">ZEC</p>
-                                            <p className="text-[10px] text-gray-500">Zcash Network</p>
-                                        </div>
+                                        {direction === 'ZEC_TO_SOL' ? (
+                                            <>
+                                                <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-black font-bold">Z</div>
+                                                <div className="text-left">
+                                                    <p className="font-bold text-base leading-none">ZEC</p>
+                                                    <p className="text-[10px] text-gray-500">Zcash Network</p>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-teal-400 flex items-center justify-center text-white font-bold">S</div>
+                                                <div className="text-left">
+                                                    <p className="font-bold text-base leading-none">SOL</p>
+                                                    <p className="text-[10px] text-gray-500">Solana Network</p>
+                                                </div>
+                                            </>
+                                        )}
                                         <ChevronRight className="ml-1 text-gray-600" size={16} />
                                     </div>
                                 </div>
@@ -363,7 +438,10 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
 
                             {/* Connector */}
                             <div className="relative h-2 flex items-center justify-center">
-                                <div className="absolute w-10 h-10 rounded-xl bg-[#141414] border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:border-orange-500 cursor-pointer transition-all z-20">
+                                <div
+                                    onClick={toggleDirection}
+                                    className="absolute w-10 h-10 rounded-xl bg-[#141414] border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:border-orange-500 cursor-pointer transition-all z-20 active:scale-90"
+                                >
                                     <ArrowRightLeft className="rotate-90" size={16} />
                                 </div>
                                 <div className="w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
@@ -379,7 +457,9 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-xs text-gray-500">Current Balance</p>
-                                        <p className="text-sm font-mono text-white">{solBalance !== null ? `${solBalance.toFixed(4)} SOL` : '--'}</p>
+                                        <p className="text-sm font-mono text-white">
+                                            {direction === 'ZEC_TO_SOL' ? (solBalance !== null ? `${solBalance.toFixed(4)} SOL` : '--') : '-- ZEC'}
+                                        </p>
                                     </div>
                                 </div>
 
@@ -388,20 +468,32 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                                         <input
                                             type="text"
                                             readOnly
-                                            value={solAmount}
+                                            value={quoteAmount}
                                             className="w-full bg-transparent text-5xl lg:text-6xl font-bold text-white/50 outline-none font-mono tracking-tighter"
                                         />
                                         <p className="text-gray-500 mt-1 text-sm">
-                                            1 ZEC ≈ {prices ? (prices.zec / prices.sol).toFixed(3) : '16.336'} SOL
+                                            Rate: 1 {direction === 'ZEC_TO_SOL' ? 'ZEC' : 'SOL'} ≈ {prices ? (direction === 'ZEC_TO_SOL' ? (prices.zec / prices.sol).toFixed(3) : (prices.sol / prices.zec).toFixed(3)) : '--'} {direction === 'ZEC_TO_SOL' ? 'SOL' : 'ZEC'}
                                         </p>
                                     </div>
 
                                     <div className="flex items-center gap-3 bg-[#141414] pl-3 pr-5 py-2.5 rounded-2xl border border-white/10 hover:bg-[#1a1a1a] cursor-pointer transition-colors shrink-0">
-                                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-teal-400 flex items-center justify-center text-white font-bold">S</div>
-                                        <div className="text-left">
-                                            <p className="font-bold text-base leading-none">SOL</p>
-                                            <p className="text-[10px] text-gray-500">Solana Network</p>
-                                        </div>
+                                        {direction === 'ZEC_TO_SOL' ? (
+                                            <>
+                                                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-teal-400 flex items-center justify-center text-white font-bold">S</div>
+                                                <div className="text-left">
+                                                    <p className="font-bold text-base leading-none">SOL</p>
+                                                    <p className="text-[10px] text-gray-500">Solana Network</p>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-black font-bold">Z</div>
+                                                <div className="text-left">
+                                                    <p className="font-bold text-base leading-none">ZEC</p>
+                                                    <p className="text-[10px] text-gray-500">Zcash Network</p>
+                                                </div>
+                                            </>
+                                        )}
                                         <ChevronRight className="ml-1 text-gray-600" size={16} />
                                     </div>
                                 </div>
@@ -431,7 +523,7 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                                 ) : (
                                     <button
                                         onClick={() => setShowConfirmSheet(true)}
-                                        disabled={!zecAmount || parseFloat(zecAmount) <= 0}
+                                        disabled={!amount || parseFloat(amount) <= 0}
                                         className="w-full py-5 rounded-2xl bg-gradient-to-r from-orange-600 to-amber-600 text-black font-bold text-lg hover:shadow-[0_0_50px_rgba(249,115,22,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 active:scale-[0.99]"
                                     >
                                         Preview
@@ -722,8 +814,8 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                     setShowConfirmSheet(false);
                     await handleBridge();
                 }}
-                zecAmount={zecAmount}
-                solAmount={solAmount}
+                zecAmount={direction === 'ZEC_TO_SOL' ? amount : quoteAmount}
+                solAmount={direction === 'ZEC_TO_SOL' ? quoteAmount : amount}
                 prices={prices}
                 loading={loading}
             />

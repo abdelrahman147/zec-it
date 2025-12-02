@@ -20,24 +20,26 @@ interface TradeResponse {
     extraId?: string; // Memo for ZEC
 }
 
-export async function getExchangeQuote(amount: number): Promise<number | null> {
-    console.log('[SimpleSwap] getExchangeQuote called with amount:', amount);
+export async function getExchangeQuote(amount: number, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<number | null> {
+    console.log(`[SimpleSwap] getExchangeQuote called with amount: ${amount}, from: ${fromCurrency}, to: ${toCurrency}`);
 
     if (!amount) return 0;
 
     // Mock response if no API key or for testing
     if (API_KEY === 'your_api_key') {
         console.log('[SimpleSwap] Using mock response');
-        // Mock rate: 1 ZEC = 16.336 SOL (approx)
-        return amount * 16.336;
+        // Mock rate logic
+        if (fromCurrency === 'zec' && toCurrency === 'sol') return amount * 16.336;
+        if (fromCurrency === 'sol' && toCurrency === 'zec') return amount / 16.336;
+        return amount; // 1:1 fallback
     }
 
     try {
         const params = new URLSearchParams({
             api_key: API_KEY,
             fixed: 'false',
-            currency_from: 'zec',
-            currency_to: 'sol',
+            currency_from: fromCurrency,
+            currency_to: toCurrency,
             amount: amount.toString()
         });
 
@@ -66,18 +68,18 @@ export async function getExchangeQuote(amount: number): Promise<number | null> {
     }
 }
 
-export async function createExchangeTrade(amount: number, recipientAddress: string): Promise<TradeResponse | null> {
+export async function createExchangeTrade(amount: number, recipientAddress: string, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<TradeResponse | null> {
     // Mock response
     if (API_KEY === 'your_api_key') {
         return {
             id: 'mock_trade_' + Math.random().toString(36).substring(7),
-            inAddress: 't1d2...mock_zec_address',
-            inCurrency: 'zec',
-            outCurrency: 'sol',
+            inAddress: fromCurrency === 'zec' ? 't1d2...mock_zec_address' : 'SolanaMockAddress...',
+            inCurrency: fromCurrency,
+            outCurrency: toCurrency,
             inAmount: amount,
-            outAmount: amount * 16.336,
+            outAmount: amount * (fromCurrency === 'zec' ? 16.336 : 1 / 16.336),
             status: 'waiting',
-            extraId: '12345678'
+            extraId: fromCurrency === 'zec' ? '12345678' : undefined
         };
     }
 
@@ -85,8 +87,8 @@ export async function createExchangeTrade(amount: number, recipientAddress: stri
         const body = {
             api_key: API_KEY,
             fixed: false,
-            currency_from: 'zec',
-            currency_to: 'sol',
+            currency_from: fromCurrency,
+            currency_to: toCurrency,
             amount: amount,
             address_to: recipientAddress,
             user_refund_address: ''
