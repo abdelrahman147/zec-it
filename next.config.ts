@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  // Triggering final deployment with API key set via CLI
+  // Triggering deployment with CORRECT API key (fixed typo)
 };
 
 export default nextConfig;
