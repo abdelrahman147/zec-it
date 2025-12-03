@@ -26,12 +26,10 @@ export async function getExchangeQuote(amount: number, fromCurrency: string = 'z
     if (!amount) return { value: 0 };
 
     // Check if API key is the placeholder
+    // Check if API key is the placeholder
     if (API_KEY === 'your_api_key') {
-        console.warn('[SimpleSwap] WARNING: Using mock response (No API Key provided)');
-        // Mock rate logic
-        if (fromCurrency === 'zec' && toCurrency === 'sol') return { value: amount * 2.17 };
-        if (fromCurrency === 'sol' && toCurrency === 'zec') return { value: amount * 0.46 };
-        return { value: amount };
+        console.error('[SimpleSwap] ERROR: No API Key provided. Cannot fetch real quotes.');
+        return { error: 'Server configuration error: Missing API Key' };
     }
 
     try {
@@ -94,20 +92,10 @@ export async function getExchangeQuote(amount: number, fromCurrency: string = 'z
 
 export async function createExchangeTrade(amount: number, recipientAddress: string, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<TradeResponse | { error: string } | null> {
     // Mock response
+    // Check if API key is the placeholder
     if (API_KEY === 'your_api_key') {
-        console.warn('[SimpleSwap] WARNING: Using mock trade response (No API Key provided)');
-        return {
-            id: 'mock_trade_' + Math.random().toString(36).substring(7),
-            inAddress: fromCurrency === 'zec' ? 't1d2...mock_zec_address' : 'SolanaMockAddress...',
-            inCurrency: fromCurrency,
-            outCurrency: toCurrency,
-            inAmount: amount,
-            outAmount: amount * (fromCurrency === 'zec' ? 2.17 : 0.46),
-            status: 'waiting',
-            extraId: fromCurrency === 'zec' ? '12345678' : undefined
-        };
-    } else {
-        // Log removed for security
+        console.error('[SimpleSwap] ERROR: No API Key provided. Cannot create real trade.');
+        return { error: 'Server configuration error: Missing API Key' };
     }
 
     try {
