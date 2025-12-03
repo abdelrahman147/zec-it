@@ -28,7 +28,9 @@ export const useZcashSnap = () => {
             // If multiple wallets are installed, window.ethereum might be the one that was "injected" last,
             // or it might be an array of providers. We need to find MetaMask specifically.
             if ((window.ethereum as any)?.providers) {
-                provider = (window.ethereum as any).providers.find((p: any) => p.isMetaMask && !p.isOkxWallet && !p.isTrust);
+                // Try to find MetaMask, but don't strictly exclude others if they claim to be MetaMask.
+                // Some wallets like OKX might support Snaps or we want to at least try them.
+                provider = (window.ethereum as any).providers.find((p: any) => p.isMetaMask);
             }
 
             if (!provider) {
@@ -48,14 +50,30 @@ export const useZcashSnap = () => {
                 throw new Error("No wallet provider found");
             }
 
-            // 1. Request Snap Installation
+            // 1. Try to "wake up" the wallet with a standard connection request first.
+            // This gives the user the "pop in my wallet" they expect.
             try {
-                await provider.request({
+                await provider.request({ method: 'eth_requestAccounts' });
+            } catch (e) {
+                console.warn("eth_requestAccounts failed, but proceeding to try Snap...", e);
+            }
+
+            // 2. Request Snap Installation with a timeout
+            try {
+                const snapRequest = provider.request({
                     method: 'wallet_requestSnaps',
                     params: {
                         [SNAP_ID]: {},
                     },
                 });
+
+                // Race against a timeout (e.g., 10 seconds)
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Connection timed out. Please check your wallet.")), 10000)
+                );
+
+                await Promise.race([snapRequest, timeoutPromise]);
+
             } catch (e: any) {
                 // Code -32601 means method not found (Snaps not supported)
                 // This happens with OKX Wallet, Trust Wallet, etc.

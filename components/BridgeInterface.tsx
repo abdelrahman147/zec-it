@@ -8,8 +8,8 @@ import { ArrowDown, Settings, History, Info, Wallet, X, ChevronDown, ExternalLin
 import { getExchangeQuote, createExchangeTrade, getExchangeStatus } from '@/app/actions/simpleswap';
 import { getCryptoPrices } from '@/app/actions/cmc';
 import UniswapStyleWalletModal from './UniswapStyleWalletModal';
-import ConfirmationBottomSheet from './ConfirmationBottomSheet';
 import { useZcashSnap } from '@/hooks/useZcashSnap';
+import QRCode from 'react-qr-code';
 
 // --- TAB COMPONENTS ---
 const HistoryView = () => (
@@ -162,6 +162,7 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
     const [success, setSuccess] = useState(false);
     const [amount, setAmount] = useState(''); // Unified amount state
     const [quoteAmount, setQuoteAmount] = useState<string>('--'); // Unified quote state
+    const [recipientAddress, setRecipientAddress] = useState(''); // Manual recipient address
     const [direction, setDirection] = useState<'ZEC_TO_SOL' | 'SOL_TO_ZEC'>('ZEC_TO_SOL');
     const [selectedSolToken, setSelectedSolToken] = useState('sol'); // 'sol', 'usdc', etc.
     const [trade, setTrade] = useState<any>(null);
@@ -169,8 +170,14 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
     const [modalOpen, setModalOpen] = useState(false);
     const [solBalance, setSolBalance] = useState<number | null>(null);
     const [prices, setPrices] = useState<{ zec: number; sol: number } | null>(null);
-    const [showConfirmSheet, setShowConfirmSheet] = useState(false);
-    const { isInstalled: zecInstalled, address: zecAddress, connect: connectZec, sendTransaction: sendZec, snapSupported } = useZcashSnap();
+    const { isInstalled: zecInstalled, address: zecAddress, connect: connectZec, sendTransaction: sendZec, snapSupported, error: zecError, isLoading: zecLoading } = useZcashSnap();
+
+    // Handle Zcash Errors
+    useEffect(() => {
+        if (zecError) {
+            alert(`Zcash Connection Error: ${zecError}`);
+        }
+    }, [zecError]);
 
     // Fetch crypto prices
     useEffect(() => {
@@ -186,19 +193,23 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
     }, []);
 
     // Fetch SOL Balance
-    useEffect(() => {
-        if (connected && publicKey) {
-            connection.getBalance(publicKey).then(balance => {
-                setSolBalance(balance / LAMPORTS_PER_SOL);
-            }).catch(e => console.error("Failed to fetch balance", e));
-        } else {
-            setSolBalance(null);
-        }
-    }, [connected, publicKey, connection]);
+    // Fetch SOL Balance - REMOVED since we are manual now
+    // useEffect(() => {
+    //     if (connected && publicKey) {
+    //         connection.getBalance(publicKey).then(balance => {
+    //             setSolBalance(balance / LAMPORTS_PER_SOL);
+    //         }).catch(e => console.error("Failed to fetch balance", e));
+    //     } else {
+    //         setSolBalance(null);
+    //     }
+    // }, [connected, publicKey, connection]);
+
+    const [quoteError, setQuoteError] = useState<string | null>(null);
 
     // Debounce quote fetching
     useEffect(() => {
         const fetchQuote = async () => {
+            setQuoteError(null);
             if (!amount || isNaN(parseFloat(amount))) {
                 setQuoteAmount('--');
                 return;
@@ -208,9 +219,12 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                 const from = direction === 'ZEC_TO_SOL' ? 'zec' : selectedSolToken;
                 const to = direction === 'ZEC_TO_SOL' ? selectedSolToken : 'zec';
 
-                const quote = await getExchangeQuote(inputAmount, from, to);
-                if (quote) {
-                    setQuoteAmount(quote.toFixed(4));
+                const result = await getExchangeQuote(inputAmount, from, to);
+                if (result && result.value !== undefined) {
+                    setQuoteAmount(result.value.toFixed(4));
+                } else if (result && result.error) {
+                    setQuoteAmount('--');
+                    setQuoteError(result.error);
                 } else {
                     setQuoteAmount('--');
                 }
@@ -241,48 +255,25 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
     }, [trade, tradeStatus]);
 
     const handleBridge = async () => {
-        if (!connected || !publicKey) {
-            alert('Please connect your Solana wallet first');
-            return;
-        }
-
-        // Only require ZEC connection if Snap is supported AND we are sending ZEC
-        if (direction === 'ZEC_TO_SOL' && snapSupported && !zecAddress) {
-            alert('Please connect your Zcash wallet first');
-            return;
-        }
-
+        // Validation: Ensure amount and recipient address are present
         if (!amount || parseFloat(amount) <= 0) {
             alert('Please enter a valid amount');
             return;
         }
 
+        if (!recipientAddress) {
+            alert('Please enter a recipient address');
+            return;
+        }
+
         setLoading(true);
-        setShowConfirmSheet(false); // Close sheet if open
 
         try {
             const from = direction === 'ZEC_TO_SOL' ? 'zec' : selectedSolToken;
             const to = direction === 'ZEC_TO_SOL' ? selectedSolToken : 'zec';
 
-            // For ZEC -> SOL, recipient is Solana wallet.
-            // For SOL -> ZEC, recipient is Zcash wallet (need input or connected snap).
-            let recipient = '';
-            if (direction === 'ZEC_TO_SOL') {
-                recipient = publicKey.toBase58();
-            } else {
-                // SOL -> ZEC
-                if (zecAddress) {
-                    recipient = zecAddress;
-                } else {
-                    // TODO: Add manual ZEC address input for SOL -> ZEC if Snap not connected
-                    const manualAddress = prompt("Enter your Zcash recipient address:");
-                    if (!manualAddress) {
-                        setLoading(false);
-                        return;
-                    }
-                    recipient = manualAddress;
-                }
-            }
+            // Use manual recipient address
+            const recipient = recipientAddress;
 
             const tradeData = await createExchangeTrade(parseFloat(amount), recipient, from, to);
 
@@ -291,54 +282,17 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                 return;
             }
 
+            if ('error' in tradeData) {
+                alert(`Trade Error: ${tradeData.error}`);
+                return;
+            }
+
             setTrade(tradeData);
             setTradeStatus('waiting');
 
-            // Handle Sending Logic
-            if (direction === 'ZEC_TO_SOL') {
-                // Sending ZEC
-                if (snapSupported && zecAddress) {
-                    try {
-                        await sendZec(tradeData.inAddress, tradeData.inAmount.toString(), tradeData.extraId);
-                    } catch (err: any) {
-                        console.error("Snap send failed:", err);
-                        const okxDeepLink = `okx://wallet/transfer?chain=zcash&to=${tradeData.inAddress}&amount=${tradeData.inAmount}${tradeData.extraId ? '&memo=' + encodeURIComponent(tradeData.extraId) : ''}`;
-                        alert("Please confirm the transaction in your wallet. If the popup didn't appear, use the manual transfer details below.");
-                    }
-                } else {
-                    const okxDeepLink = `okx://wallet/transfer?chain=zcash&to=${tradeData.inAddress}&amount=${tradeData.inAmount}${tradeData.extraId ? '&memo=' + encodeURIComponent(tradeData.extraId) : ''}`;
-                    window.open(okxDeepLink, '_blank');
-                }
-            } else {
-                // Sending SOL/SPL
-                if (selectedSolToken === 'sol') {
-                    try {
-                        const transaction = new Transaction().add(
-                            SystemProgram.transfer({
-                                fromPubkey: publicKey,
-                                toPubkey: new PublicKey(tradeData.inAddress),
-                                lamports: Math.floor(tradeData.inAmount * LAMPORTS_PER_SOL),
-                            })
-                        );
-
-                        const signature = await sendTransaction(transaction, connection);
-
-                        // Notify user
-                        console.log('Transaction sent:', signature);
-
-                        // We don't strictly need to wait for confirmation here as the polling will pick it up,
-                        // but it's good UX to know it was sent.
-                        await connection.confirmTransaction(signature, 'processed');
-
-                    } catch (error) {
-                        console.error('Error sending SOL:', error);
-                        alert('Failed to send SOL. Please try again or send manually.');
-                    }
-                } else {
-                    // SPL Token transfer (USDC, etc.) - Placeholder
-                    alert(`Please send ${tradeData.inAmount} ${tradeData.inCurrency.toUpperCase()} to ${tradeData.inAddress}`);
-                }
-            }
+            // We are not auto-sending transactions anymore.
+            // The user will manually send funds to the deposit address.
+            setTradeStatus('waiting');
 
             // Start polling for status
             const pollInterval = setInterval(async () => {
@@ -376,326 +330,293 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
             case 'Settings': return <SettingsView />;
             case 'Bridge':
             default:
-                return (
-                    <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 h-full p-4 lg:p-8 overflow-y-auto">
-                        {/* Left Column: Massive Bridge Interface */}
-                        <div className="lg:col-span-8 flex flex-col gap-4">
-                            {/* FROM Section */}
-                            <div className="flex-1 bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 lg:p-8 flex flex-col justify-center relative group hover:border-orange-500/20 transition-all duration-500 min-h-[220px]">
-                                <div className="absolute top-0 right-0 w-[40%] h-full bg-gradient-to-l from-orange-500/5 to-transparent pointer-events-none rounded-r-3xl"></div>
+                // If trade is active, show the Status View (SimpleSwap style)
+                if (trade) {
+                    return (
+                        <div className="max-w-3xl mx-auto p-4 lg:p-8 space-y-6">
+                            {/* Status Header */}
+                            <div className="text-center space-y-2">
+                                <h2 className="text-2xl font-bold text-white">
+                                    {tradeStatus === 'waiting' ? 'Awaiting your deposit' :
+                                        tradeStatus === 'confirming' ? 'Confirming' :
+                                            tradeStatus === 'exchanging' ? 'Exchanging' :
+                                                tradeStatus === 'sending' ? 'Sending' : 'Finished'}
+                                </h2>
+                                <p className="text-gray-400 text-sm">
+                                    {tradeStatus === 'waiting' ? 'Send the funds to the address below' :
+                                        tradeStatus === 'exchanging' ? 'Your coins are safe and being exchanged' :
+                                            tradeStatus === 'sending' ? 'Coins are on the way' :
+                                                'Exchange completed successfully'}
+                                </p>
+                            </div>
 
-                                <div className="flex justify-between items-start mb-4 relative z-10">
-                                    <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-[#141414] border border-white/5 text-gray-400">
-                                        <span className="text-[10px] uppercase tracking-wider font-semibold">Asset to Bridge</span>
+                            {/* Main Status Card */}
+                            <div className="bg-[#0a0a0a] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+                                {/* Deposit Section (Only when waiting) */}
+                                {tradeStatus === 'waiting' && (
+                                    <div className="p-8 border-b border-white/5 space-y-6">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-gray-400">Send deposit:</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xl font-bold text-white">{trade.inAmount} {trade.inCurrency.toUpperCase()}</span>
+                                                <span className={`text-[10px] px-2 py-0.5 rounded ${trade.inCurrency === 'zec' ? 'bg-orange-500/20 text-orange-500' : 'bg-purple-500/20 text-purple-500'}`}>
+                                                    {trade.inCurrency.toUpperCase()}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-[#141414] rounded-xl p-6 flex flex-col items-center gap-6">
+                                            <div className="bg-white p-3 rounded-xl">
+                                                {/* QR Code */}
+                                                <QRCode
+                                                    value={trade.inAddress}
+                                                    size={160}
+                                                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                                    viewBox={`0 0 256 256`}
+                                                />
+                                            </div>
+                                            <div className="w-full">
+                                                <div className="flex items-center gap-3 bg-[#0a0a0a] border border-white/10 px-4 py-3 rounded-xl w-full">
+                                                    <span className="text-sm font-mono text-white truncate flex-1">{trade.inAddress}</span>
+                                                    <button
+                                                        onClick={() => navigator.clipboard.writeText(trade.inAddress)}
+                                                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+                                                    >
+                                                        <Copy size={18} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex gap-3">
+                                            <Info className="text-blue-400 shrink-0" size={20} />
+                                            <p className="text-sm text-blue-200/80">
+                                                If you sent the coins and the status did not change immediately, do not worry. Our system needs a few minutes to detect the transaction.
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-xs text-gray-500">Available Balance</p>
-                                        <p className="text-sm font-mono text-white">
-                                            {direction === 'ZEC_TO_SOL' ? '-- ZEC' : (solBalance !== null ? `${solBalance.toFixed(4)} SOL` : '--')}
-                                        </p>
+                                )}
+
+                                {/* Progress Stepper */}
+                                <div className="p-8 border-b border-white/5">
+                                    <div className="relative flex justify-between items-center px-4">
+                                        {/* Line Background */}
+                                        <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-white/5 -z-10 mx-8"></div>
+                                        {[
+                                            { id: 'waiting', label: 'Pending deposit' },
+                                            { id: 'confirming', label: 'Confirming' },
+                                            { id: 'exchanging', label: 'Exchanging' },
+                                            { id: 'sending', label: 'Sending' }
+                                        ].map((step) => {
+                                            const isActive = tradeStatus === step.id;
+                                            const stepIndex = ['waiting', 'confirming', 'exchanging', 'sending'].indexOf(step.id);
+                                            const currentIndex = ['waiting', 'confirming', 'exchanging', 'sending', 'finished'].indexOf(tradeStatus);
+                                            const isCompleted = currentIndex > stepIndex || tradeStatus === 'finished';
+
+                                            return (
+                                                <div key={step.id} className="flex flex-col items-center gap-3 bg-[#0a0a0a] px-2 z-10">
+                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${isActive || isCompleted ? 'border-green-500 bg-green-500 text-black' : 'border-gray-700 bg-[#141414] text-gray-500'
+                                                        }`}>
+                                                        {isCompleted ? <Check size={14} strokeWidth={3} /> :
+                                                            isActive ? <Loader2 size={14} className="animate-spin" /> :
+                                                                <div className="w-2 h-2 rounded-full bg-current" />}
+                                                    </div>
+                                                    <span className={`text-xs font-medium ${isActive || isCompleted ? 'text-green-500' : 'text-gray-600'}`}>
+                                                        {step.label}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col md:flex-row items-end md:items-center gap-4 relative z-10">
-                                    <div className="flex-1 w-full">
+                                {/* Operation Details */}
+                                <div className="p-8 space-y-4">
+                                    <h3 className="text-sm font-medium text-white mb-4">Operation details</h3>
+
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-gray-500">You sent:</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-white font-mono">{trade.inAmount} {trade.inCurrency.toUpperCase()}</span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${trade.inCurrency === 'zec' ? 'bg-orange-500/20 text-orange-500' : 'bg-purple-500/20 text-purple-500'}`}>
+                                                {trade.inCurrency.toUpperCase()}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-gray-500">Deposit address:</span>
+                                        <div className="flex items-center gap-2 bg-[#141414] px-3 py-1.5 rounded-lg max-w-[200px] md:max-w-xs">
+                                            <span className="text-xs text-gray-400 truncate">{trade.inAddress}</span>
+                                            <Copy size={12} className="text-gray-500 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(trade.inAddress)} />
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px bg-white/5 my-2"></div>
+
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-gray-500">You get:</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-white font-mono">≈ {trade.outAmount} {trade.outCurrency.toUpperCase()}</span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${trade.outCurrency === 'zec' ? 'bg-orange-500/20 text-orange-500' : 'bg-purple-500/20 text-purple-500'}`}>
+                                                {trade.outCurrency.toUpperCase()}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-gray-500">Recipient address:</span>
+                                        <div className="flex items-center gap-2 bg-[#141414] px-3 py-1.5 rounded-lg max-w-[200px] md:max-w-xs">
+                                            <span className="text-xs text-gray-400 truncate">{recipientAddress}</span>
+                                            <Copy size={12} className="text-gray-500 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(recipientAddress)} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {tradeStatus === 'finished' && (
+                                    <div className="p-8 pt-0">
+                                        <button
+                                            onClick={() => { setTrade(null); setAmount(''); setRecipientAddress(''); }}
+                                            className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-colors"
+                                        >
+                                            Create new exchange
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
+
+                // Default Input View (SimpleSwap style)
+                return (
+                    <div className="max-w-3xl mx-auto p-4 lg:p-8 flex flex-col gap-6">
+                        <div className="text-center mb-4">
+                            <h2 className="text-3xl font-bold text-white mb-2">Crypto Exchange</h2>
+                            <p className="text-gray-400">Free from sign-up, limits, and complications</p>
+                        </div>
+
+                        <div className="bg-[#0a0a0a] border border-white/5 rounded-3xl p-1 shadow-2xl">
+                            <div className="bg-[#141414] rounded-[20px] p-6 lg:p-8 space-y-6">
+                                {/* You Send */}
+                                <div className="space-y-2">
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-400">You send</span>
+                                        <span className="text-gray-500">
+                                            {direction === 'ZEC_TO_SOL' ? 'Zcash Network' : 'Solana Network'}
+                                        </span>
+                                    </div>
+                                    <div className="flex gap-4">
                                         <input
                                             type="number"
                                             value={amount}
                                             onChange={(e) => setAmount(e.target.value)}
-                                            className="w-full bg-transparent text-5xl lg:text-6xl font-bold text-white placeholder-gray-800 outline-none font-mono tracking-tighter"
-                                            placeholder="0.000"
-                                            step="0.001"
-                                            min="0"
+                                            className="flex-1 bg-transparent text-3xl font-bold text-white outline-none placeholder-gray-700 font-mono"
+                                            placeholder="0.1"
                                         />
-                                        <p className="text-gray-500 mt-1 text-sm">
-                                            {/* TODO: Fix USD calculation based on direction */}
-                                            ≈ $-- USD
-                                        </p>
-                                    </div>
-
-                                    <div className="flex items-center gap-3 bg-[#141414] pl-3 pr-5 py-2.5 rounded-2xl border border-white/10 hover:bg-[#1a1a1a] cursor-pointer transition-colors shrink-0">
-                                        {direction === 'ZEC_TO_SOL' ? (
-                                            <>
-                                                <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-black font-bold">Z</div>
-                                                <div className="text-left">
-                                                    <p className="font-bold text-base leading-none">ZEC</p>
-                                                    <p className="text-[10px] text-gray-500">Zcash Network</p>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-teal-400 flex items-center justify-center text-white font-bold">S</div>
-                                                <div className="text-left">
-                                                    <p className="font-bold text-base leading-none">SOL</p>
-                                                    <p className="text-[10px] text-gray-500">Solana Network</p>
-                                                </div>
-                                            </>
-                                        )}
-                                        <ChevronRight className="ml-1 text-gray-600" size={16} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Connector */}
-                            <div className="relative h-2 flex items-center justify-center">
-                                <div
-                                    onClick={toggleDirection}
-                                    className="absolute w-10 h-10 rounded-xl bg-[#141414] border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:border-orange-500 cursor-pointer transition-all z-20 active:scale-90"
-                                >
-                                    <ArrowRightLeft className="rotate-90" size={16} />
-                                </div>
-                                <div className="w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-                            </div>
-
-                            {/* TO Section */}
-                            <div className="flex-1 bg-[#0a0a0a] border border-white/5 rounded-3xl p-6 lg:p-8 flex flex-col justify-center relative group hover:border-purple-500/20 transition-all duration-500 min-h-[220px]">
-                                <div className="absolute top-0 right-0 w-[40%] h-full bg-gradient-to-l from-purple-500/5 to-transparent pointer-events-none rounded-r-3xl"></div>
-
-                                <div className="flex justify-between items-start mb-4 relative z-10">
-                                    <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-[#141414] border border-white/5 text-gray-400">
-                                        <span className="text-[10px] uppercase tracking-wider font-semibold">Receive On</span>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-xs text-gray-500">Current Balance</p>
-                                        <p className="text-sm font-mono text-white">
-                                            {direction === 'ZEC_TO_SOL' ? (solBalance !== null ? `${solBalance.toFixed(4)} SOL` : '--') : '-- ZEC'}
-                                        </p>
+                                        <div className="flex items-center gap-2 bg-[#0a0a0a] px-4 py-2 rounded-xl border border-white/10 cursor-pointer hover:border-white/20 transition-colors" onClick={toggleDirection}>
+                                            {direction === 'ZEC_TO_SOL' ? (
+                                                <>
+                                                    <img src="https://static.simpleswap.io/images/currencies-logo/zec.svg" className="w-6 h-6 rounded-full" />
+                                                    <span className="font-bold text-white">ZEC</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <img src="https://static.simpleswap.io/images/currencies-logo/sol.svg" className="w-6 h-6 rounded-full" />
+                                                    <span className="font-bold text-white">SOL</span>
+                                                </>
+                                            )}
+                                            <ChevronDown size={16} className="text-gray-500" />
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col md:flex-row items-end md:items-center gap-4 relative z-10">
-                                    <div className="flex-1 w-full">
+                                {/* Divider / Switcher */}
+                                <div className="relative h-px bg-white/5 my-4">
+                                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#141414] p-2 rounded-full border border-white/5 cursor-pointer hover:text-orange-500 transition-colors" onClick={toggleDirection}>
+                                        <ArrowRightLeft size={16} className="text-gray-500 rotate-90" />
+                                    </div>
+                                </div>
+
+                                {/* You Get */}
+                                <div className="space-y-2">
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-400">You get</span>
+                                        <span className="text-gray-500">
+                                            {direction === 'ZEC_TO_SOL' ? 'Solana Network' : 'Zcash Network'}
+                                        </span>
+                                    </div>
+                                    <div className="flex gap-4">
                                         <input
                                             type="text"
                                             readOnly
-                                            value={quoteAmount}
-                                            className="w-full bg-transparent text-5xl lg:text-6xl font-bold text-white/50 outline-none font-mono tracking-tighter"
+                                            value={quoteAmount === '--' ? '≈ 0.00' : `≈ ${quoteAmount}`}
+                                            className="flex-1 bg-transparent text-3xl font-bold text-gray-400 outline-none font-mono"
                                         />
-                                        <p className="text-gray-500 mt-1 text-sm">
-                                            Rate: 1 {direction === 'ZEC_TO_SOL' ? 'ZEC' : 'SOL'} ≈ {prices ? (direction === 'ZEC_TO_SOL' ? (prices.zec / prices.sol).toFixed(3) : (prices.sol / prices.zec).toFixed(3)) : '--'} {direction === 'ZEC_TO_SOL' ? 'SOL' : 'ZEC'}
-                                        </p>
+                                        <div className="flex items-center gap-2 bg-[#0a0a0a] px-4 py-2 rounded-xl border border-white/10 cursor-pointer hover:border-white/20 transition-colors" onClick={toggleDirection}>
+                                            {direction === 'ZEC_TO_SOL' ? (
+                                                <>
+                                                    <img src="https://static.simpleswap.io/images/currencies-logo/sol.svg" className="w-6 h-6 rounded-full" />
+                                                    <span className="font-bold text-white">SOL</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <img src="https://static.simpleswap.io/images/currencies-logo/zec.svg" className="w-6 h-6 rounded-full" />
+                                                    <span className="font-bold text-white">ZEC</span>
+                                                </>
+                                            )}
+                                            <ChevronDown size={16} className="text-gray-500" />
+                                        </div>
                                     </div>
-
-                                    <div className="flex items-center gap-3 bg-[#141414] pl-3 pr-5 py-2.5 rounded-2xl border border-white/10 hover:bg-[#1a1a1a] cursor-pointer transition-colors shrink-0">
-                                        {direction === 'ZEC_TO_SOL' ? (
-                                            <>
-                                                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-teal-400 flex items-center justify-center text-white font-bold">S</div>
-                                                <div className="text-left">
-                                                    <p className="font-bold text-base leading-none">SOL</p>
-                                                    <p className="text-[10px] text-gray-500">Solana Network</p>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-black font-bold">Z</div>
-                                                <div className="text-left">
-                                                    <p className="font-bold text-base leading-none">ZEC</p>
-                                                    <p className="text-[10px] text-gray-500">Zcash Network</p>
-                                                </div>
-                                            </>
-                                        )}
-                                        <ChevronRight className="ml-1 text-gray-600" size={16} />
-                                    </div>
+                                    {quoteError && (
+                                        <p className="text-red-500 text-xs mt-2">{quoteError}</p>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* Action Bar */}
-                            {!trade ? (
-                                !connected || (snapSupported && !zecAddress) ? (
-                                    <div className="flex flex-col md:flex-row gap-3">
-                                        {snapSupported && !zecAddress && (
-                                            <button
-                                                onClick={connectZec}
-                                                className="flex-1 py-5 rounded-2xl bg-[#f5a623] text-black font-bold text-lg hover:shadow-[0_0_50px_rgba(245,166,35,0.3)] transition-all active:scale-[0.99] flex items-center justify-center gap-2"
-                                            >
-                                                <Wallet size={20} /> Connect Zcash
-                                            </button>
-                                        )}
-                                        {!connected && (
-                                            <button
-                                                onClick={() => setModalOpen(true)}
-                                                className="flex-1 py-5 rounded-2xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold text-lg hover:shadow-[0_0_50px_rgba(124,58,237,0.3)] transition-all active:scale-[0.99] flex items-center justify-center gap-2"
-                                            >
-                                                <Wallet size={20} /> Connect Solana
-                                            </button>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <button
-                                        onClick={() => setShowConfirmSheet(true)}
-                                        disabled={!amount || parseFloat(amount) <= 0}
-                                        className="w-full py-5 rounded-2xl bg-gradient-to-r from-orange-600 to-amber-600 text-black font-bold text-lg hover:shadow-[0_0_50px_rgba(249,115,22,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 active:scale-[0.99]"
-                                    >
-                                        Preview
-                                    </button>
-                                )
-                            ) : (
-                                <div className="bg-[#1A1B1E] rounded-3xl p-6 border border-white/5 shadow-2xl">
-                                    <div className="flex justify-between items-center mb-6">
-                                        <h3 className="text-xl font-bold text-white">Transaction Details</h3>
-                                        {/* Optional Close/Expand button could go here */}
-                                    </div>
-
-                                    {/* Asset Swap Summary */}
-                                    <div className="flex items-center justify-between bg-[#141517] p-4 rounded-xl mb-6 border border-white/5">
-                                        <div className="flex flex-col">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <img src="https://static.simpleswap.io/images/currencies-logo/zec.svg" alt="ZEC" className="w-6 h-6 rounded-full" />
-                                                <span className="text-gray-400 font-medium">ZEC</span>
-                                            </div>
-                                            <span className="text-xl font-bold text-white">{trade.inAmount} ZEC</span>
-                                        </div>
-
-                                        <ArrowRight className="text-gray-500 w-5 h-5" />
-
-                                        <div className="flex flex-col items-end">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <img src="https://static.simpleswap.io/images/currencies-logo/sol.svg" alt="SOL" className="w-6 h-6 rounded-full" />
-                                                <span className="text-gray-400 font-medium">Solana</span>
-                                            </div>
-                                            <span className="text-xl font-bold text-white">{trade.outAmount.toFixed(4)} SOL</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Vertical Timeline */}
-                                    <div className="relative pl-4 space-y-8 mb-8">
-                                        {/* Connecting Line */}
-                                        <div className="absolute left-[27px] top-4 bottom-4 w-0.5 bg-gray-800 -z-10"></div>
-
-                                        {/* Step 1: Send ZEC */}
-                                        <div className="flex gap-4">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${tradeStatus === 'waiting' ? 'bg-blue-500/20 text-blue-500 ring-2 ring-blue-500/50' : 'bg-[#2C2D31] text-gray-500'
-                                                }`}>
-                                                <img src="https://static.simpleswap.io/images/currencies-logo/zec.svg" alt="ZEC" className="w-5 h-5 opacity-80" />
-                                            </div>
-                                            <div className="flex flex-col pt-1 w-full">
-                                                <span className="text-white font-medium">Send ZEC on Zcash Network</span>
-                                                {tradeStatus === 'waiting' && (
-                                                    <div className="mt-2">
-                                                        <button
-                                                            onClick={() => window.open(`okx://wallet/transfer?chain=zcash&to=${trade.inAddress}&amount=${trade.inAmount}${trade.extraId ? '&memo=' + encodeURIComponent(trade.extraId) : ''}`, '_blank')}
-                                                            className="flex items-center gap-2 text-blue-400 text-sm hover:text-blue-300 transition-colors font-medium"
-                                                        >
-                                                            Confirm in Okxwallet
-                                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                                        </button>
-
-                                                        {/* Manual Fallback Toggle */}
-                                                        <div className="mt-3 p-3 bg-[#141517] rounded-lg border border-white/5">
-                                                            <div className="flex justify-between items-center mb-2">
-                                                                <span className="text-xs text-gray-500">Didn't pop up?</span>
-                                                                <div className="flex gap-2">
-                                                                    <button
-                                                                        onClick={() => navigator.clipboard.writeText(trade.inAddress)}
-                                                                        className="text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-colors"
-                                                                    >
-                                                                        Copy Address
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => navigator.clipboard.writeText(trade.inAmount.toString())}
-                                                                        className="text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-colors"
-                                                                    >
-                                                                        Copy Amount
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="text-xs text-gray-400 break-all font-mono bg-black/20 p-2 rounded">
-                                                                {trade.inAddress}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {tradeStatus !== 'waiting' && <span className="text-sm text-green-500 flex items-center gap-1 mt-1"><Check className="w-3 h-3" /> Sent</span>}
-                                            </div>
-                                        </div>
-
-                                        {/* Step 2: Processing */}
-                                        <div className="flex gap-4">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${['confirming', 'exchanging', 'sending'].includes(tradeStatus) ? 'bg-blue-500/20 text-blue-500 ring-2 ring-blue-500/50' : 'bg-[#2C2D31] text-gray-500'
-                                                }`}>
-                                                <ArrowRightLeft className="w-5 h-5" />
-                                            </div>
-                                            <div className="flex flex-col pt-1">
-                                                <span className={`font-medium ${['confirming', 'exchanging', 'sending'].includes(tradeStatus) ? 'text-white' : 'text-gray-500'}`}>
-                                                    Relay processes your transaction
-                                                </span>
-                                                {['confirming', 'exchanging', 'sending'].includes(tradeStatus) && (
-                                                    <span className="text-sm text-blue-400 animate-pulse mt-1">Processing...</span>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* Step 3: Receive SOL */}
-                                        <div className="flex gap-4">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${tradeStatus === 'finished' ? 'bg-green-500/20 text-green-500 ring-2 ring-green-500/50' : 'bg-[#2C2D31] text-gray-500'
-                                                }`}>
-                                                <img src="https://static.simpleswap.io/images/currencies-logo/sol.svg" alt="SOL" className="w-5 h-5 opacity-80" />
-                                            </div>
-                                            <div className="flex flex-col pt-1">
-                                                <span className={`font-medium ${tradeStatus === 'finished' ? 'text-white' : 'text-gray-500'}`}>
-                                                    Receive SOL on Solana
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Footer Info */}
-                                    <div className="border-t border-white/5 pt-4 space-y-2">
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Max Slippage</span>
-                                            <span className="text-gray-300">Auto 0.5%</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Rate</span>
-                                            <span className="text-gray-300">1 ZEC ≈ {(trade.outAmount / trade.inAmount).toFixed(4)} SOL</span>
+                            {/* Recipient Address Section */}
+                            <div className="p-6 lg:p-8 pt-0">
+                                <div className="space-y-2">
+                                    <label className="text-sm text-gray-400 ml-1">
+                                        {direction === 'ZEC_TO_SOL' ? "The recipient's Solana address" : "The recipient's Zcash address"}
+                                    </label>
+                                    <div className="bg-[#141414] rounded-xl flex items-center px-4 py-3 border border-white/5 focus-within:border-blue-500/50 transition-colors">
+                                        <input
+                                            type="text"
+                                            value={recipientAddress}
+                                            onChange={(e) => setRecipientAddress(e.target.value)}
+                                            className="flex-1 bg-transparent text-white placeholder-gray-600 outline-none font-mono text-sm"
+                                            placeholder={direction === 'ZEC_TO_SOL' ? "Enter Solana address" : "Enter Zcash address"}
+                                        />
+                                        <div className="flex items-center gap-2 text-gray-500">
+                                            <QrCode size={20} className="hover:text-white cursor-pointer" />
                                         </div>
                                     </div>
                                 </div>
-                            )
-                            }
-                        </div >
 
-                        {/* Right Column: Info & History */}
-                        <div className="lg:col-span-4 flex flex-col gap-6" >
-                            {/* Network Status Card */}
-                            <div className="bg-[#0a0a0a] border border-white/5 rounded-3xl p-5 relative overflow-hidden" >
-                                <h3 className="text-gray-400 text-sm font-medium mb-4 flex items-center gap-2">
-                                    <Activity size={16} /> Network Status
-                                </h3>
-                                <div className="space-y-3 relative z-10">
-                                    <div className="flex justify-between items-center p-3 rounded-xl bg-[#141414]">
-                                        <span className="text-xs text-gray-500">Congestion</span>
-                                        <span className="text-green-400 text-xs font-medium">Low</span>
-                                    </div>
-                                    <div className="flex justify-between items-center p-3 rounded-xl bg-[#141414]">
-                                        <span className="text-xs text-gray-500">Est. Time</span>
-                                        <span className="text-white text-xs font-medium">~2 mins</span>
-                                    </div>
-                                    <div className="flex justify-between items-center p-3 rounded-xl bg-[#141414]">
-                                        <span className="text-xs text-gray-500">Max Slippage</span>
-                                        <span className="text-white text-xs font-medium">0.5%</span>
-                                    </div>
-                                </div>
-                            </div >
+                                <button
+                                    onClick={handleBridge}
+                                    disabled={loading || !amount || parseFloat(amount) <= 0 || !recipientAddress}
+                                    className="w-full mt-6 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg shadow-lg shadow-blue-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 size={20} className="animate-spin" />
+                                            <span>Creating Exchange...</span>
+                                        </>
+                                    ) : (
+                                        'Create an exchange'
+                                    )}
+                                </button>
 
-                            {/* Recent Transactions List */}
-                            <div className="flex-1 bg-[#0a0a0a] border border-white/5 rounded-3xl p-5 flex flex-col" >
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-gray-400 text-sm font-medium flex items-center gap-2">
-                                        <Clock size={16} /> Recent Activity
-                                    </h3>
-                                    <button className="text-[10px] text-orange-500 hover:text-orange-400">View All</button>
+                                <div className="flex justify-center gap-4 mt-6 text-xs text-gray-600">
+                                    <a href="#" className="hover:text-gray-400">Privacy Policy</a>
+                                    <span>•</span>
+                                    <a href="#" className="hover:text-gray-400">Terms of Service</a>
                                 </div>
-
-                                <div className="space-y-2 overflow-y-auto pr-2 custom-scrollbar flex-1">
-                                    {/* TODO: Fetch recent activity from backend */}
-                                    <div className="p-4 text-center text-xs text-gray-500">
-                                        No recent activity.
-                                    </div>
-                                </div>
-                            </div >
-                        </div >
-                    </div >
+                            </div>
+                        </div>
+                    </div>
                 );
         }
     };
@@ -805,20 +726,7 @@ const BridgeInterface: React.FC<BridgeInterfaceProps> = ({ onBack }) => {
                 ))}
             </div>
 
-            <UniswapStyleWalletModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
 
-            <ConfirmationBottomSheet
-                isOpen={showConfirmSheet}
-                onClose={() => setShowConfirmSheet(false)}
-                onConfirm={async () => {
-                    setShowConfirmSheet(false);
-                    await handleBridge();
-                }}
-                zecAmount={direction === 'ZEC_TO_SOL' ? amount : quoteAmount}
-                solAmount={direction === 'ZEC_TO_SOL' ? quoteAmount : amount}
-                prices={prices}
-                loading={loading}
-            />
         </div>
     );
 };

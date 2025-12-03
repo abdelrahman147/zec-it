@@ -24,11 +24,11 @@ export default function ConfirmationBottomSheet({
     prices,
     loading
 }: ConfirmationBottomSheetProps) {
-    const [countdown, setCountdown] = useState(7);
+    const [countdown, setCountdown] = useState(3);
 
     useEffect(() => {
         if (!isOpen) {
-            setCountdown(7);
+            setCountdown(3);
             return;
         }
 
@@ -45,7 +45,7 @@ export default function ConfirmationBottomSheet({
         return () => clearInterval(timer);
     }, [isOpen]);
 
-    const exchangeRate = prices ? (prices.zec / prices.sol).toFixed(3) : '16.336';
+    const exchangeRate = prices ? (prices.zec / prices.sol).toFixed(3) : '2.170';
     const zecUsdValue = prices && zecAmount ? (parseFloat(zecAmount) * prices.zec).toFixed(2) : '0.00';
 
     return (

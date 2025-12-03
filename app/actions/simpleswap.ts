@@ -1,7 +1,7 @@
 'use server';
 
 const API_KEY = process.env.SIMPLESWAP_API_KEY || 'your_api_key';
-const API_URL = 'https://api.simpleswap.io/v3';
+const API_URL = 'https://api.simpleswap.io'; // Base URL
 
 interface QuoteResponse {
     estimatedAmount: number;
@@ -20,18 +20,18 @@ interface TradeResponse {
     extraId?: string; // Memo for ZEC
 }
 
-export async function getExchangeQuote(amount: number, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<number | null> {
+export async function getExchangeQuote(amount: number, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<{ value?: number; error?: string } | null> {
     console.log(`[SimpleSwap] getExchangeQuote called with amount: ${amount}, from: ${fromCurrency}, to: ${toCurrency}`);
 
-    if (!amount) return 0;
+    if (!amount) return { value: 0 };
 
-    // Mock response if no API key or for testing
+    // Check if API key is the placeholder
     if (API_KEY === 'your_api_key') {
-        console.log('[SimpleSwap] Using mock response');
+        console.warn('[SimpleSwap] WARNING: Using mock response (No API Key provided)');
         // Mock rate logic
-        if (fromCurrency === 'zec' && toCurrency === 'sol') return amount * 16.336;
-        if (fromCurrency === 'sol' && toCurrency === 'zec') return amount / 16.336;
-        return amount; // 1:1 fallback
+        if (fromCurrency === 'zec' && toCurrency === 'sol') return { value: amount * 2.17 };
+        if (fromCurrency === 'sol' && toCurrency === 'zec') return { value: amount * 0.46 };
+        return { value: amount };
     }
 
     try {
@@ -43,59 +43,84 @@ export async function getExchangeQuote(amount: number, fromCurrency: string = 'z
             amount: amount.toString()
         });
 
-        const url = `https://api.simpleswap.io/get_estimated?${params.toString()}`;
-        console.log('[SimpleSwap] Fetching:', url);
+        const url = `${API_URL}/get_estimated?${params.toString()}`;
+        // console.log('[SimpleSwap] Fetching:', url); // Log removed for security
 
         const response = await fetch(url, { cache: 'no-store' });
 
         if (!response.ok) {
             const errorText = await response.text();
             console.error('[SimpleSwap] Quote Error:', response.status, errorText);
-            return null;
+            try {
+                const errorJson = JSON.parse(errorText);
+                return { error: errorJson.description || errorJson.message || 'Error fetching quote' };
+            } catch {
+                return { error: `API Error: ${response.status}` };
+            }
         }
 
-        // API returns JSON string like "0.0063175"
-        const estimatedAmount = await response.json();
-        console.log('[SimpleSwap] Quote response:', estimatedAmount, 'type:', typeof estimatedAmount);
+        const responseText = await response.text();
+        console.log('[SimpleSwap] Raw quote response:', responseText);
 
-        // Parse string or number
-        const result = typeof estimatedAmount === 'string' ? Number(estimatedAmount) : estimatedAmount;
-        console.log('[SimpleSwap] Parsed result:', result);
-        return result;
+        let estimatedAmount: number;
+
+        // Try parsing as JSON first (handles "123.45" or 123.45)
+        try {
+            const json = JSON.parse(responseText);
+            if (typeof json === 'number') {
+                estimatedAmount = json;
+            } else if (typeof json === 'string') {
+                estimatedAmount = parseFloat(json);
+            } else if (json && (json.description || json.message)) {
+                return { error: json.description || json.message };
+            } else {
+                estimatedAmount = parseFloat(responseText.replace(/['"]/g, ''));
+            }
+        } catch (e) {
+            // If not JSON, try parsing raw text, removing quotes if present
+            estimatedAmount = parseFloat(responseText.replace(/['"]/g, ''));
+        }
+
+        if (isNaN(estimatedAmount)) {
+            return { error: `Invalid API response: ${responseText.substring(0, 50)}` };
+        }
+
+        return { value: estimatedAmount };
     } catch (error) {
         console.error('[SimpleSwap] Quote Exception:', error);
-        return null;
+        return { error: 'Network error' };
     }
 }
 
-export async function createExchangeTrade(amount: number, recipientAddress: string, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<TradeResponse | null> {
+export async function createExchangeTrade(amount: number, recipientAddress: string, fromCurrency: string = 'zec', toCurrency: string = 'sol'): Promise<TradeResponse | { error: string } | null> {
     // Mock response
     if (API_KEY === 'your_api_key') {
+        console.warn('[SimpleSwap] WARNING: Using mock trade response (No API Key provided)');
         return {
             id: 'mock_trade_' + Math.random().toString(36).substring(7),
             inAddress: fromCurrency === 'zec' ? 't1d2...mock_zec_address' : 'SolanaMockAddress...',
             inCurrency: fromCurrency,
             outCurrency: toCurrency,
             inAmount: amount,
-            outAmount: amount * (fromCurrency === 'zec' ? 16.336 : 1 / 16.336),
+            outAmount: amount * (fromCurrency === 'zec' ? 2.17 : 0.46),
             status: 'waiting',
             extraId: fromCurrency === 'zec' ? '12345678' : undefined
         };
+    } else {
+        // Log removed for security
     }
 
     try {
         const body = {
-            api_key: API_KEY,
-            fixed: false,
             currency_from: fromCurrency,
             currency_to: toCurrency,
             amount: amount,
             address_to: recipientAddress,
-            user_refund_address: ''
+            fixed: false
         };
 
-        const url = `https://api.simpleswap.io/create_exchange?api_key=${API_KEY}`;
-        console.log('[SimpleSwap] Creating trade:', url);
+        const url = `${API_URL}/create_exchange?api_key=${API_KEY}`;
+        // console.log('[SimpleSwap] Creating trade:', url); // Log removed for security
         console.log('[SimpleSwap] Body:', JSON.stringify(body));
 
         const response = await fetch(url, {
@@ -109,7 +134,12 @@ export async function createExchangeTrade(amount: number, recipientAddress: stri
         if (!response.ok) {
             const errorText = await response.text();
             console.error('[SimpleSwap] Create Trade Error:', response.status, errorText);
-            return null;
+            try {
+                const errorJson = JSON.parse(errorText);
+                return { error: errorJson.message || errorJson.description || 'Failed to create trade' };
+            } catch (e) {
+                return { error: `API Error: ${response.status} ${response.statusText}` };
+            }
         }
 
         const data = await response.json();
@@ -127,7 +157,7 @@ export async function createExchangeTrade(amount: number, recipientAddress: stri
         };
     } catch (error) {
         console.error('[SimpleSwap] Create Trade Exception:', error);
-        return null;
+        return { error: 'Network error or exception' };
     }
 }
 
@@ -150,7 +180,7 @@ export async function getExchangeStatus(tradeId: string): Promise<string | null>
             id: tradeId
         });
 
-        const response = await fetch(`https://api.simpleswap.io/get_exchange?${params.toString()}`, {
+        const response = await fetch(`${API_URL}/get_exchange?${params.toString()}`, {
             cache: 'no-store',
         });
 
