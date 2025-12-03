@@ -17,7 +17,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onLaunchApp }) => {
             try {
                 // 1. Get accurate exchange rate from SimpleSwap for 1 ZEC
                 const quote = await getExchangeQuote(1, 'zec', 'sol');
-                setSolAmount(quote);
+                setSolAmount(quote?.value ?? null);
 
                 // 2. Get USD price for ZEC from CoinGecko for display
                 const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd');
