@@ -32,10 +32,23 @@ import {
     QueryClient,
 } from "@tanstack/react-query";
 
+const monad = {
+    id: 143,
+    name: 'Monad',
+    nativeCurrency: { name: 'Monad', symbol: 'MON', decimals: 18 },
+    rpcUrls: {
+        default: { http: ['https://rpc3.monad.xyz'] },
+    },
+    blockExplorers: {
+        default: { name: 'Monad Explorer', url: 'https://monadvision.com' },
+    },
+    testnet: true,
+} as const;
+
 const config = getDefaultConfig({
     appName: 'ZecIt Bridge',
     projectId: '3a8170812b534d0ff9d794f19a901d64', // Public testing ID, user should replace
-    chains: [mainnet, polygon, optimism, arbitrum, base, bsc, avalanche],
+    chains: [mainnet, polygon, optimism, arbitrum, base, bsc, avalanche, monad],
     ssr: true,
     wallets: [
         {
