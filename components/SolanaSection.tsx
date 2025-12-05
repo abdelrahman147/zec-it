@@ -14,7 +14,7 @@ const SolanaSection = () => (
                 The Privacy of <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-orange-500">Zcash</span>
             </h2>
             <p className="text-gray-400 text-lg md:text-xl max-w-2xl mx-auto">
-                Our proprietary "Ghost Bridge" technology wraps your ZEC into a secure, untraceable SPL token on Solana, ensuring your financial footprint never leaves the dark forest.
+                Our proprietary "Ghost Mixer" technology wraps your ZEC into a secure, untraceable SPL token on Solana, ensuring your financial footprint never leaves the dark forest.
             </p>
         </div>
     </div>

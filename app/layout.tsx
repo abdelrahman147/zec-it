@@ -18,6 +18,7 @@ export const metadata: Metadata = {
 };
 
 import AppWalletProvider from "@/components/AppWalletProvider";
+import EvmWalletProvider from "@/components/EvmWalletProvider";
 
 export default function RootLayout({
   children,
@@ -29,9 +30,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppWalletProvider>
-          {children}
-        </AppWalletProvider>
+        <EvmWalletProvider>
+          <AppWalletProvider>
+            {children}
+          </AppWalletProvider>
+        </EvmWalletProvider>
       </body>
     </html>
   );

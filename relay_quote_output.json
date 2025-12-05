@@ -1,0 +1,4 @@
+{
+  "message": "Amount must be greater than 0",
+  "errorCode": "AMOUNT_TOO_LOW"
+}

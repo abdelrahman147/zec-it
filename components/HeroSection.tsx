@@ -43,12 +43,12 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onLaunchApp }) => {
 
             <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center mt-8 md:mt-20">
                 <h1 className="text-4xl md:text-8xl font-medium text-white tracking-tight leading-[1.1] mb-6 drop-shadow-2xl">
-                    Safe and private Bridge <br />
-                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400">Zcash to Solana</span>
+                    Safe and private Mixer <br />
+                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400">Zcash to Solana Mixer</span>
                 </h1>
 
                 <p className="max-w-xl mx-auto text-base md:text-lg text-gray-400/80 mb-12 md:mb-20 font-light leading-relaxed px-4">
-                    Safe and easy privacy bridging for everyone. <br className="hidden md:block" />
+                    Safe and easy privacy mixing for everyone. <br className="hidden md:block" />
                     Move assets anonymously with Zecit.
                 </p>
 
@@ -61,7 +61,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onLaunchApp }) => {
                             className="flex items-center gap-2 px-6 md:px-8 py-3 md:py-4 rounded-full bg-gradient-to-r from-orange-500 to-amber-600 text-white font-medium shadow-[0_10px_40px_-10px_rgba(249,115,22,0.5)] hover:shadow-[0_10px_50px_-5px_rgba(249,115,22,0.6)] hover:-translate-y-1 transition-all text-sm md:text-base"
                         >
                             <MessageSquare size={18} className="fill-white" />
-                            Start bridging now <ArrowUpRight size={18} />
+                            Start mixing now <ArrowUpRight size={18} />
                         </button>
                     </div>
 
@@ -70,13 +70,13 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onLaunchApp }) => {
                         <div className="bg-[#141414] rounded-[16px] md:rounded-[24px] overflow-hidden min-h-[400px] md:min-h-[500px] flex flex-col md:flex-row relative">
                             <div className="hidden md:flex flex-col w-64 p-6 border-r border-white/5 bg-[#141414]">
                                 <div className="space-y-6 mt-8">
-                                    <div className="flex items-center gap-3 text-orange-500 bg-orange-500/10 px-4 py-3 rounded-xl font-medium"><Wallet size={20} /> Bridge</div>
+                                    <div className="flex items-center gap-3 text-orange-500 bg-orange-500/10 px-4 py-3 rounded-xl font-medium"><Wallet size={20} /> Mixer</div>
                                 </div>
                             </div>
                             <div className="flex-1 p-4 md:p-12 relative">
                                 <div className="relative z-10 flex flex-col gap-4 md:gap-6 max-w-2xl mx-auto mt-8 md:mt-8">
                                     <div className="flex items-center justify-between mb-2 md:mb-4">
-                                        <h3 className="text-xl md:text-2xl font-bold text-white">Bridge Assets</h3>
+                                        <h3 className="text-xl md:text-2xl font-bold text-white">Mix Assets</h3>
                                         <div className="flex gap-2">
                                             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                                             <span className="text-xs text-gray-400">Network Stable</span>

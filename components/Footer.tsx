@@ -16,7 +16,7 @@ const Footer = () => {
                             <span className="text-xl font-bold text-white">Zecit</span>
                         </div>
                         <p className="text-gray-500 text-sm leading-relaxed">
-                            The first privacy-preserving bridge connecting the robust anonymity of Zcash with the high-performance ecosystem of Solana.
+                            The first privacy-preserving mixer connecting the robust anonymity of Zcash with the high-performance ecosystem of Solana.
                         </p>
                     </div>
 

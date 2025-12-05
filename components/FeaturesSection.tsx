@@ -141,7 +141,7 @@ const FeaturesSection = () => {
                                             <CheckCircle2 size={32} />
                                         </div>
                                         <h3 className="text-xl font-bold">Audited Contracts</h3>
-                                        <p className="text-sm text-gray-400">Our bridge smart contracts have been fully audited by CertiK and Halborn.</p>
+                                        <p className="text-sm text-gray-400">Our mixer smart contracts have been fully audited by CertiK and Halborn.</p>
                                     </div>
 
                                     <div className="md:col-span-2 bg-[#18181a] p-6 rounded-2xl border border-white/5 flex items-center justify-between">

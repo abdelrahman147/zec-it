@@ -100,7 +100,7 @@ const ArchitectureSection = () => {
                     Automate <span className="text-orange-500">Privacy</span>
                 </h2>
                 <p className="text-gray-400 max-w-xl mx-auto">
-                    Visualize the bridging logic like a pro. A node-based architecture for infinite composability and security.
+                    Visualize the mixing logic like a pro. A node-based architecture for infinite composability and security.
                 </p>
             </div>
 
@@ -129,8 +129,8 @@ const ArchitectureSection = () => {
 
                 {/* 2. Automation Cloud (Bridge Engine) */}
                 <WorkflowNode
-                    id="bridge-engine-core"
-                    title="Bridge Engine"
+                    id="mixer-engine-core"
+                    title="Mixer Engine"
                     subtitle="Orchestrate Swaps & Validation"
                     icon={<Cloud size={24} />}
                     color="blue-500"
