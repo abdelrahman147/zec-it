@@ -26,6 +26,22 @@ import {
     base,
     bsc,
     avalanche,
+    gnosis,
+    fantom,
+    zora,
+    scroll,
+    linea,
+    zkSync,
+    blast,
+    manta,
+    metis,
+    mode,
+    aurora,
+    celo,
+    moonbeam,
+    moonriver,
+    cronos,
+    sei,
 } from 'wagmi/chains';
 import {
     QueryClientProvider,
@@ -48,7 +64,10 @@ const monad = {
 const config = getDefaultConfig({
     appName: 'ZecIt Bridge',
     projectId: '3a8170812b534d0ff9d794f19a901d64', // Public testing ID, user should replace
-    chains: [mainnet, polygon, optimism, arbitrum, base, bsc, avalanche, monad],
+    chains: [
+        mainnet, polygon, optimism, arbitrum, base, bsc, avalanche, monad,
+        gnosis, fantom, zora, scroll, linea, zkSync, blast, manta, metis, mode, aurora, celo, moonbeam, moonriver, cronos, sei
+    ],
     ssr: true,
     wallets: [
         {
