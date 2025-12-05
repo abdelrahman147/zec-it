@@ -2,7 +2,12 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import BridgeInterface from '@/components/BridgeInterface';
+import dynamic from 'next/dynamic';
+
+const BridgeInterface = dynamic(() => import('@/components/BridgeInterface'), {
+    ssr: false,
+    loading: () => <div className="min-h-screen flex items-center justify-center text-white">Loading Interface...</div>
+});
 
 export default function DashboardPage() {
     const router = useRouter();
