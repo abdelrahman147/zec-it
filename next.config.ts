@@ -9,6 +9,18 @@ const nextConfig: NextConfig = {
       "**/*.sh": ["raw-loader"],
       "**/node_modules/thread-stream/**/*.ts": ["raw-loader"],
     }
+  },
+  webpack: (config) => {
+    config.module.rules.push({
+      test: /\.(md|LICENSE|sh)$/,
+      use: 'raw-loader',
+    });
+    config.module.rules.push({
+      test: /\.ts$/,
+      include: /node_modules\/thread-stream/,
+      use: 'raw-loader',
+    });
+    return config;
   }
 };
 
