@@ -89,7 +89,14 @@ const Navbar: React.FC<NavbarProps> = ({ scrolled, onLaunchApp }) => {
           </div>
         )}
 
-        <UniswapStyleWalletModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
+        <UniswapStyleWalletModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          chainType="solana"
+          evmAddress={null}
+          onConnectEvm={() => { }}
+          onDisconnectEvm={() => { }}
+        />
       </nav>
     </div>
   );
