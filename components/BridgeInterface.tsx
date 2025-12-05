@@ -425,12 +425,12 @@ const SwapView = () => {
             sent: {
                 symbol: originToken?.symbol || '',
                 amount: amount,
-                logoURI: originToken?.logoURI
+                logoURI: originToken?.logoURI || ''
             },
             received: {
                 symbol: destToken?.symbol || '',
                 amount: quote.details.currencyOut.amountFormatted, // Use quote output amount
-                logoURI: destToken?.logoURI
+                logoURI: destToken?.logoURI || ''
             }
         });
         setTxModalOpen(true);
@@ -692,10 +692,10 @@ const SwapView = () => {
                                     onChange={(e) => setRecipientAddress(e.target.value)}
                                     placeholder={destChain?.id === 792703809 || destChain?.id === 9286185 ? "Solana Address..." : "0x..."}
                                     className={`bg-[#1a1a1a] border ${recipientAddress && ((destChain?.id === 792703809 || destChain?.id === 9286185)
-                                            ? (recipientAddress.length < 32 || recipientAddress.length > 44)
-                                            : !recipientAddress.startsWith('0x') || recipientAddress.length !== 42)
-                                            ? 'border-red-500/50 focus:border-red-500'
-                                            : 'border-white/10 focus:border-indigo-500'
+                                        ? (recipientAddress.length < 32 || recipientAddress.length > 44)
+                                        : !recipientAddress.startsWith('0x') || recipientAddress.length !== 42)
+                                        ? 'border-red-500/50 focus:border-red-500'
+                                        : 'border-white/10 focus:border-indigo-500'
                                         } rounded-lg px-3 py-1.5 text-xs text-white w-40 focus:outline-none font-mono transition-colors`}
                                 />
                             ) : (
